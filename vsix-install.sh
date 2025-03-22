@@ -62,6 +62,8 @@ detect_vs_code_variant() {
     echo "code"
   elif command -v code-oss &> /dev/null; then
     echo "code-oss"
+  elif command -v cursor &> /dev/null; then
+    echo "cursor"
   else
     echo "No VS Code variant detected. Please install one." >&2
     exit 1
@@ -92,18 +94,18 @@ extract_from_extension_name() {
 
 # Function to check if the extension is already installed
 check_if_installed() {
-  local extension="${1}"
+  local extension_name="${1}"
 
   # Capture the output of grep (whether the extension is installed or not)
-  local grep_output=$($VS_CODE_CMD --list-extensions | grep -i "$extension")
+  local grep_output=$($VS_CODE_CMD --list-extensions | grep -i "^${extension_name}$")
 
   # Check if the output of grep is non-empty
-  if [ -n "$grep_output" ]; then
-    echo "Extension $extension is already installed."
-    return 1  # Return 1 to indicate the extension is already installed
+  if [ -n "${grep_output}" ]; then
+    echo "Extension ${extension_name} is already installed."
+    return 0  # Return 0 to indicate the extension is already installed
   else
-    echo "Extension $extension is not installed."
-    return 0  # Return 0 to indicate the extension is not installed
+    echo "Extension ${extension_name} is not installed."
+    return 1  # Return 1 to indicate the extension is not installed
   fi
 }
 
@@ -158,9 +160,13 @@ download() {
     extracted=$(extract_from_extension_name "${input_value}")
   fi
 
-  IFS=' ' read -r publisher extension <<< "$extracted"
+  IFS=' ' read -r publisher extension <<< "${extracted}"
 
-  $FORCE || (! check_if_installed "${publisher}.${extension}" && return 1)
+  local extension_name="${publisher}.${extension}"
+
+  if ! $FORCE && check_if_installed $extension_name; then
+    return 0
+  fi
 
   local vsix_url="https://${publisher}.gallery.vsassets.io/_apis/public/gallery/publisher/${publisher}/extension/${extension}/latest/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage"
 
@@ -169,14 +175,14 @@ download() {
   mkdir -p "$DIR"
 
   # Download the VSIX file using curl to the Downloads folder
-  echo -e "Downloading latest version of '${publisher}.${extension}'\nto '${output_file}'..."
+  echo -e "Downloading latest version of '${extension_name}'\nto '${output_file}'..."
 
   curl --progress-bar -L "${vsix_url}" -o "${output_file}" \
     || { echo "Download failed"; exit 1; }
 
   echo ""
 
-  get_dependencies "${publisher}.${extension}" "${output_file}"
+  get_dependencies "${extension_name}" "${output_file}"
 
   # will be ordered by last dependency in the chain to the initial requested VSIX file
   VSIX_FILES+=("${output_file}") 
@@ -191,7 +197,7 @@ install() {
 
   echo ""
 
-  if ! $KEEP; then
+  if ! $KEEP && [ ${#VSIX_FILES[@]} -gt 0 ]; then
     # Delete the downloaded VSIX file after installation
     rm -- "${VSIX_FILES[@]}"
     echo -e "VSIX files in '${DIR}' deleted.\n"
